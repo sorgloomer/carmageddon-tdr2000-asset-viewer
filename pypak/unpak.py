@@ -29,7 +29,7 @@ def convert_tx_files(extract_result):
 def convert_tx_file(tx_file):
     import PIL.Image
     base = pakfiles.without_ext(tx_file)
-    tga_candidates = glob.glob(base + "*.tga")
+    tga_candidates = glob.glob(base + "_*.tga")
     if not tga_candidates:
         print(f"Warning no tga candidate for {tx_file}")
     tga_candidate = max(tga_candidates, key=os.path.getsize)

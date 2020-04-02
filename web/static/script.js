@@ -17,12 +17,14 @@ function init() {
     scene = new THREE.Scene();
 
     geometry = new THREE.BoxGeometry( 200, 200, 200 );
-    material = new THREE.MeshNormalMaterial();
+    material = new THREE.MeshBasicMaterial({
+        vertexColors: THREE.VertexColors,
+    });
 
     mesh = new THREE.Mesh( geometry, material );
     scene.add( mesh );
 
-    renderer = new THREE.WebGLRenderer( { antialias: true } );
+    renderer = new THREE.WebGLRenderer({ antialias: true });
     renderer.setSize( window.innerWidth, window.innerHeight );
     document.body.appendChild( renderer.domElement );
 
@@ -93,6 +95,7 @@ class MshsParser {
         const vertexCount = this.data.getU32(this.offset + 20);
         this.offset += 24;
         var geom = new THREE.Geometry();
+        geom.uvs = [];
         this.readVerticesInto(geom, vertexCount);
         this.readFacesInto(geom, triangleCount);
         this.fixupColors(geom);
@@ -131,21 +134,14 @@ class MshsParser {
             const i2 = this.data.getU32(this.offset + 8);
             this.offset += 12;
             geom.faces.push(new THREE.Face3( i0, i1, i2 ));
+            geom.faceVertexUvs[0].push([
+                geom.uvs[i0],
+                geom.uvs[i1],
+                geom.uvs[i2],
+            ]);
         }
     }
     readVertexInto(geom) {
-
-        true || console.log(bytes_to_hex(this.data.getBytes(this.offset, 36))
-            + "\n" + this.data.getF32(this.offset + 0)
-            + " " + this.data.getF32(this.offset + 4)
-            + " " + this.data.getF32(this.offset + 8)
-            + " " + this.data.getF32(this.offset + 12)
-            + " " + this.data.getF32(this.offset + 16)
-            + " " + this.data.getF32(this.offset + 20)
-            + " " + this.data.getF32(this.offset + 24)
-            + " " + this.data.getF32(this.offset + 28)
-            + " " + this.data.getF32(this.offset + 32));
-
         geom.vertices.push(new THREE.Vector3(
             this.data.getF32(this.offset + 0),
             this.data.getF32(this.offset + 4),
@@ -155,6 +151,10 @@ class MshsParser {
             this.data.getF32(this.offset + 20),
             this.data.getF32(this.offset + 16),
             this.data.getF32(this.offset + 12),
+        ));
+        geom.uvs.push(new THREE.Vector2(
+            this.data.getF32(this.offset + 28),
+            1-this.data.getF32(this.offset + 32),
         ));
         this.offset += 36;
     }
@@ -297,9 +297,6 @@ function expect(x, msg) {
 async function load() {
     const LEVEL = urlParams.map;
     const meshes = await getMeshGeometries(`Assets/${LEVEL}/${LEVEL}.mshs`);
-    material = new THREE.MeshBasicMaterial({
-        vertexColors: THREE.VertexColors
-    });
     const resp = await fetch(`Assets/${LEVEL}/${LEVEL}.hie`);
     const data = await resp.text();
     const tokens = new CarmaScript(data);
@@ -326,11 +323,15 @@ async function load() {
     }
 
     const materialCount = tokens.nextInt();
+    const materials = [];
     for (var i = 0; i < materialCount; i++) {
+        var material = [];
         for (var j = 0; j < 5; j++) {
-            tokens.nextNumber();
+            material.push(tokens.nextNumber());
         }
+        materials.push(material);
     }
+    console.log(materials);
 
     const matrixCount = tokens.nextInt();
     const matrices = [];
@@ -365,7 +366,27 @@ async function load() {
             )
         );
     }
-    function traverse(nodeIndex, transform) {
+    const TEXTURE_LOADER = new THREE.TextureLoader();
+    function textureMaterial(textureName) {
+        const cache = textureMaterial.cache;
+        var material = cache.get(textureName);
+        if (!material) {
+            var texture = TEXTURE_LOADER.load(`Assets/${LEVEL}/${textureName}.tx.png`);
+            texture.wrapS = THREE.RepeatWrapping;
+            texture.wrapT = THREE.RepeatWrapping;
+            material = new THREE.MeshBasicMaterial({
+                map: texture,
+                vertexColors: THREE.VertexColors,
+                transparent: true,
+                side: THREE.DoubleSide,
+            });
+            cache.set(textureName, material);
+        }
+        return material;
+    }
+    textureMaterial.cache = new Map();
+
+    function traverse(nodeIndex, context) {
         if (nodeIndex === null) return;
         const node = renderNodes[nodeIndex];
         const TYPE_GROUP = 1;
@@ -376,27 +397,35 @@ async function load() {
         switch (node.type) {
             case TYPE_GROUP:
                 const newTransform = new THREE.Matrix4();
-                newTransform.multiplyMatrices(transform, matrices[node.index]);
-                traverseChildren(node, newTransform);
+                newTransform.multiplyMatrices(context.transform, matrices[node.index]);
+                traverseChildren(node, {
+                    ...context,
+                    transform: newTransform,
+                });
                 break;
             case TYPE_MESH:
-                addObject(meshes[node.index], transform);
-                traverseChildren(node, transform);
+                addObject(meshes[node.index], context);
+                traverseChildren(node, context);
+                break;
+            case TYPE_TEXTURE:
+                traverseChildren(node, {
+                    ...context,
+                    material: textureMaterial(textureNames[node.index]),
+                });
                 break;
             case TYPE_CULL:
-            case TYPE_TEXTURE:
             case TYPE_MATERIAL:
-                traverseChildren(node, transform);
+                traverseChildren(node, context);
                 break;
             default:
                 throw new Error(`unknown render node type ${node.type}`);
         }
     }
 
-    function addObject(geom, transform) {
-        const object = new THREE.Mesh(geom, material);
+    function addObject(geom, context) {
+        const object = new THREE.Mesh(geom, context.material);
         object.matrixAutoUpdate = false;
-        object.matrix.copy(transform);
+        object.matrix.copy(context.transform);
         scene.add(object);
     }
 
@@ -408,7 +437,10 @@ async function load() {
         }
     }
     scene.remove( mesh );
-    traverse(0, new THREE.Matrix4());
+    traverse(0, {
+        transform: new THREE.Matrix4(),
+        material: material,
+    });
 }
 
 const startTime = Date.now();
