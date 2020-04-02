@@ -3,7 +3,11 @@ var geometry, material, mesh;
 var controls, urlParams;
 
 function init() {
-  urlParams = parseUrlParams();
+    urlParams = parseUrlParams();
+    if (!urlParams.map) {
+        window.location.href = "?map=HollowoodMesh";
+        return;
+    }
 	camera = new THREE.PerspectiveCamera( 70, window.innerWidth / window.innerHeight, 0.5, 5000 );
 	camera.position.x = 20;
 	camera.position.y = 200;
@@ -291,12 +295,12 @@ function expect(x, msg) {
     if (!x) throw new Error(msg);
 }
 async function load() {
-    const LEVEL = urlParams["map"] || "PoliceStateMesh";
-    const meshes = await getMeshGeometries(`Assets/${LEVEL}/${LEVEL}.mshs`);
+    const LEVEL = urlParams.map;
+    const meshes = await getMeshGeometries(`Assets/${LEVEL}.mshs`);
     material = new THREE.MeshBasicMaterial({
       vertexColors: THREE.VertexColors
     });
-    const resp = await fetch(`Assets/${LEVEL}/${LEVEL}.hie`);
+    const resp = await fetch(`Assets/${LEVEL}.hie`);
     const data = await resp.text();
     const tokens = new CarmaScript(data);
     
