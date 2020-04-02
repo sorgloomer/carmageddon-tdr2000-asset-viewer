@@ -296,11 +296,11 @@ function expect(x, msg) {
 }
 async function load() {
     const LEVEL = urlParams.map;
-    const meshes = await getMeshGeometries(`Assets/${LEVEL}.mshs`);
+    const meshes = await getMeshGeometries(`Assets/${LEVEL}/${LEVEL}.mshs`);
     material = new THREE.MeshBasicMaterial({
       vertexColors: THREE.VertexColors
     });
-    const resp = await fetch(`Assets/${LEVEL}.hie`);
+    const resp = await fetch(`Assets/${LEVEL}/${LEVEL}.hie`);
     const data = await resp.text();
     const tokens = new CarmaScript(data);
     
