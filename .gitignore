@@ -2,3 +2,5 @@
 /pypak/data
 /web/static/Assets
 /web/node_modules
+.idea/
+__pycache__/
