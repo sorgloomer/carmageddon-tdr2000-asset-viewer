@@ -1,5 +1,5 @@
 var camera, scene, renderer;
-var geometry, material, mesh;
+var geometry, defaultMaterial, mesh;
 var controls, urlParams;
 
 function init() {
@@ -17,11 +17,11 @@ function init() {
     scene = new THREE.Scene();
 
     geometry = new THREE.BoxGeometry( 200, 200, 200 );
-    material = new THREE.MeshBasicMaterial({
+    defaultMaterial = new THREE.MeshBasicMaterial({
         vertexColors: THREE.VertexColors,
     });
 
-    mesh = new THREE.Mesh( geometry, material );
+    mesh = new THREE.Mesh( geometry, defaultMaterial );
     scene.add( mesh );
 
     renderer = new THREE.WebGLRenderer({ antialias: true });
@@ -99,7 +99,14 @@ class MshsParser {
         this.readVerticesInto(geom, vertexCount);
         this.readFacesInto(geom, triangleCount);
         this.fixupColors(geom);
+        this.fixCenter(geom);
         return geom;
+    }
+    fixCenter(geom) {
+        geom.computeBoundingBox();
+        geom.originalCenter = new THREE.Vector3(0, 0, 0);
+        geom.boundingBox.getCenter(geom.originalCenter);
+        geom.translate(-geom.originalCenter.x, -geom.originalCenter.y, -geom.originalCenter.z);
     }
     readGeometries(count) {
         var result = [];
@@ -303,11 +310,15 @@ async function load() {
 
     expect(tokens.nextString() === "Version", "Version header");
     expect(tokens.nextInt() === 3, "Version number 3");
+
+    const cullNodes = [];
     const cullNodeCount = tokens.nextNumber();
     for (var i = 0; i < cullNodeCount; i++) {
+        var cullNode = [];
         for (var j = 0; j < 10; j++) {
-            tokens.nextNumber();
+            cullNode.push(tokens.nextNumber());
         }
+        cullNodes.push(cullNode);
     }
 
     const collisionDataMeshCount = tokens.nextInt();
@@ -325,13 +336,12 @@ async function load() {
     const materialCount = tokens.nextInt();
     const materials = [];
     for (var i = 0; i < materialCount; i++) {
-        var material = [];
+        var loadedMaterial = [];
         for (var j = 0; j < 5; j++) {
-            material.push(tokens.nextNumber());
+            loadedMaterial.push(tokens.nextNumber());
         }
-        materials.push(material);
+        materials.push(loadedMaterial);
     }
-    console.log(materials);
 
     const matrixCount = tokens.nextInt();
     const matrices = [];
@@ -368,21 +378,22 @@ async function load() {
     }
     const TEXTURE_LOADER = new THREE.TextureLoader();
     function textureMaterial(textureName) {
+        if (!textureName) return defaultMaterial;
         const cache = textureMaterial.cache;
-        var material = cache.get(textureName);
-        if (!material) {
+        var currentMaterial = cache.get(textureName);
+        if (!currentMaterial) {
             var texture = TEXTURE_LOADER.load(`Assets/${LEVEL}/${textureName}.tx.png`);
             texture.wrapS = THREE.RepeatWrapping;
             texture.wrapT = THREE.RepeatWrapping;
-            material = new THREE.MeshBasicMaterial({
+            currentMaterial = new THREE.MeshBasicMaterial({
                 map: texture,
                 vertexColors: THREE.VertexColors,
                 transparent: true,
                 side: THREE.DoubleSide,
             });
-            cache.set(textureName, material);
+            cache.set(textureName, currentMaterial);
         }
-        return material;
+        return currentMaterial;
     }
     textureMaterial.cache = new Map();
 
@@ -414,6 +425,11 @@ async function load() {
                 });
                 break;
             case TYPE_CULL:
+                traverseChildren(node, {
+                    ...context,
+                    cullnode: node.index,
+                });
+                break;
             case TYPE_MATERIAL:
                 traverseChildren(node, context);
                 break;
@@ -422,11 +438,37 @@ async function load() {
         }
     }
 
+    var SPHERE = new THREE.SphereGeometry(20);
     function addObject(geom, context) {
-        const object = new THREE.Mesh(geom, context.material);
+        var material = new THREE.MeshBasicMaterial({
+            color: (context.cullnode+3) * 0x123456
+        });
+        material = context.material;
+
+        const center = new THREE.Vector3(0, 0, 0);
+        geom.boundingBox.getCenter(center);
+
+        const object = new THREE.Mesh(geom, material);
         object.matrixAutoUpdate = false;
+        var m = new THREE.Matrix4();
+        m.makeTranslation(geom.originalCenter.x, geom.originalCenter.y, geom.originalCenter.z);
         object.matrix.copy(context.transform);
+        object.matrix.multiply(m);
+        // object.matrix.makeTranslation(worldCenter.x, worldCenter.y, worldCenter.z);
+        object.position.copy(center);
         scene.add(object);
+
+
+        /*
+        var cullNodeObj = new THREE.Mesh(new THREE.SphereGeometry(40), material);
+        var cullNode = cullNodes[context.cullnode];
+        cullNodeObj.matrixAutoUpdate = false;
+        cullNodeObj.matrix.makeTranslation(cullNode[3], cullNode[4], cullNode[5]);
+        cullNodeObj.position.applyMatrix4(cullNodeObj.matrix);
+        console.log(cullNode);
+        scene.add(cullNodeObj);
+
+         */
     }
 
     function traverseChildren(node, transform) {
@@ -439,7 +481,8 @@ async function load() {
     scene.remove( mesh );
     traverse(0, {
         transform: new THREE.Matrix4(),
-        material: material,
+        material: defaultMaterial,
+        cullnode: null,
     });
 }
 
